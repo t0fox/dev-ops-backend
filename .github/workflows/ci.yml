@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Build and start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for nginx and smoke test /
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost > /tmp/resp.txt; then
+              echo "Response: $(cat /tmp/resp.txt)"
+              if grep -q "Hello from Effective Mobile!" /tmp/resp.txt; then
+                exit 0
+              fi
+            fi
+            echo "waiting for service... ($i)"
+            sleep 2
+          done
+          echo "service did not respond correctly in time"
+          docker compose logs
+          exit 1
+
+      - name: Check unknown path returns 404
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/unknown)
+          echo "Status for /unknown: $code"
+          test "$code" = "404"
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down
